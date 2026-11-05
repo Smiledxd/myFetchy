@@ -113,6 +113,10 @@ export class ItemModal {
     this.archiveBtn = this.overlay.querySelector("#btn-archive-item");
     this.closeBtn = this.overlay.querySelector("#btn-close-modal");
     this.duplicateNotice = this.overlay.querySelector("#duplicate-notice");
+    this.inlineNewColBox = this.overlay.querySelector("#inline-new-col-box");
+    this.inlineNewColInput = this.overlay.querySelector("#inline-new-col-input");
+    this.btnSaveInlineCol = this.overlay.querySelector("#btn-save-inline-col");
+    this.btnCancelInlineCol = this.overlay.querySelector("#btn-cancel-inline-col");
 
     this.currentType = "link";
   }
@@ -150,22 +154,33 @@ export class ItemModal {
       this.checkForDuplicates();
     });
 
-    // Selector de colección (incluyendo + Nueva colección)
+    // Selector de colección (incluyendo + Nueva colección inline)
     if (this.collectionSelect) {
-      this.collectionSelect.addEventListener("change", async () => {
+      this.collectionSelect.addEventListener("change", () => {
         if (this.collectionSelect.value === "__new__") {
-          const newName = window.prompt("Nombre de la nueva colección:");
-          if (newName && newName.trim()) {
-            if (this.options.onCreateCollection) {
-              const res = await this.options.onCreateCollection(newName.trim());
-              if (res.ok && res.data) {
-                this.availableCollections.push(res.data);
-                this.renderCollections(res.data.id);
-                return;
-              }
-            }
-          }
-          this.collectionSelect.value = "";
+          this.showInlineNewCollection();
+        } else if (this.inlineNewColBox) {
+          this.inlineNewColBox.style.display = "none";
+        }
+      });
+    }
+
+    if (this.btnSaveInlineCol) {
+      this.btnSaveInlineCol.addEventListener("click", () => this.handleSaveInlineCollection());
+    }
+
+    if (this.btnCancelInlineCol) {
+      this.btnCancelInlineCol.addEventListener("click", () => this.hideInlineNewCollection());
+    }
+
+    if (this.inlineNewColInput) {
+      this.inlineNewColInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.handleSaveInlineCollection();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          this.hideInlineNewCollection();
         }
       });
     }
@@ -340,6 +355,45 @@ export class ItemModal {
     this.collectionSelect.innerHTML = options.join("");
   }
 
+  showInlineNewCollection() {
+    if (!this.inlineNewColBox) return;
+    this.inlineNewColBox.style.display = "block";
+    if (this.inlineNewColInput) {
+      this.inlineNewColInput.value = "";
+      this.inlineNewColInput.focus();
+    }
+  }
+
+  hideInlineNewCollection() {
+    if (this.inlineNewColBox) {
+      this.inlineNewColBox.style.display = "none";
+    }
+    if (this.collectionSelect) {
+      this.collectionSelect.value = "";
+    }
+  }
+
+  async handleSaveInlineCollection() {
+    if (!this.inlineNewColInput) return;
+    const name = this.inlineNewColInput.value.trim();
+    if (!name) {
+      this.inlineNewColInput.focus();
+      return;
+    }
+
+    if (this.options.onCreateCollection) {
+      if (this.btnSaveInlineCol) this.btnSaveInlineCol.disabled = true;
+      const res = await this.options.onCreateCollection(name);
+      if (this.btnSaveInlineCol) this.btnSaveInlineCol.disabled = false;
+
+      if (res.ok && res.data) {
+        this.availableCollections.push(res.data);
+        this.renderCollections(res.data.id);
+        if (this.inlineNewColBox) this.inlineNewColBox.style.display = "none";
+      }
+    }
+  }
+
   open(item = null, availableTags = [], availableCollections = [], existingItems = []) {
     this.currentItem = item;
     this.availableTags = availableTags;
@@ -348,6 +402,7 @@ export class ItemModal {
     this.selectedTags.clear();
     this.resetDeleteState();
     if (this.duplicateNotice) this.duplicateNotice.style.display = "none";
+    if (this.inlineNewColBox) this.inlineNewColBox.style.display = "none";
 
     this.renderCollections(item ? item.collection_id : null);
 
@@ -395,6 +450,7 @@ export class ItemModal {
     this.currentItem = null;
     this.duplicateWarningItem = null;
     if (this.duplicateNotice) this.duplicateNotice.style.display = "none";
+    if (this.inlineNewColBox) this.inlineNewColBox.style.display = "none";
   }
 
   resetDeleteState() {
