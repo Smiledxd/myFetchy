@@ -1,0 +1,19 @@
+{
+  "name": "myfetchy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App personal para guardar y encontrar links, apuntes, archivos y páginas.",
+  "type": "module",
+  "scripts": {
+    "dev": "servor src index.html 8080 --reload",
+    "lint": "oxlint src",
+    "fmt": "oxfmt src",
+    "deploy": "gh-pages -d src"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.3.0",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
+    "servor": "^4.0.2"
+  }
+}

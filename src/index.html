@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>myFetchy</title>
+
+    <!-- Tipografías institucionales -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Khand:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Estilos (Ruta relativa) -->
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <!-- Vista de Autenticación -->
+    <main id="auth-view" class="auth-view">
+      <div class="auth-card">
+        <h1 class="font-heading">MY<span>FETCHY</span></h1>
+        <p class="auth-desc">Tus links, apuntes y archivos en un solo lugar.</p>
+
+        <form id="login-form">
+          <div class="form-group" style="text-align: left">
+            <label for="login-email" class="form-label">Correo electrónico</label>
+            <input
+              type="email"
+              id="login-email"
+              class="form-control"
+              placeholder="tu@correo.com"
+              required
+              autocomplete="email"
+            />
+          </div>
+          <button
+            type="submit"
+            id="btn-login"
+            class="btn-primary"
+            style="width: 100%; justify-content: center; padding: 12px; margin-top: 8px"
+          >
+            Enviarme el link
+          </button>
+        </form>
+
+        <p
+          id="login-msg"
+          style="margin-top: 16px; font-size: 0.9rem; min-height: 24px; font-weight: 500"
+        ></p>
+      </div>
+    </main>
+
+    <!-- Vista Principal de la Aplicación -->
+    <div id="app-view" style="display: none">
+      <!-- Encabezado y Barra de Búsqueda Fija -->
+      <header class="app-header">
+        <div class="container">
+          <div class="header-top">
+            <div class="logo-wrap">
+              <h1 class="app-logo">MY<span>FETCHY</span></h1>
+            </div>
+            <div class="header-actions">
+              <button id="btn-new-item" class="btn-primary" title="Guardar nuevo enlace o nota">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Guardar
+              </button>
+              <button id="btn-logout" class="btn-icon" title="Cerrar sesión">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Buscador -->
+          <div class="search-bar-wrap">
+            <svg
+              class="search-icon"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input
+              type="text"
+              id="search-input"
+              class="search-input"
+              placeholder="Buscar por título, nota, link o etiqueta..."
+              autocomplete="off"
+            />
+            <button id="search-clear" class="search-clear" title="Limpiar búsqueda">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+            <span class="search-shortcut-hint">/</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Barra de Filtros por Etiqueta -->
+      <div class="container">
+        <div id="tag-chips-wrap" class="tag-chips-wrap"></div>
+      </div>
+
+      <!-- Contenedor Principal de Items -->
+      <main class="container">
+        <!-- Sección de Fijados -->
+        <section id="pinned-section" style="display: none; margin-bottom: 24px">
+          <h2 class="section-title">
+            <span>Fijados</span>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="12" y1="17" x2="12" y2="22"></line>
+              <path
+                d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"
+              ></path>
+            </svg>
+          </h2>
+          <div id="pinned-list" class="items-grid"></div>
+        </section>
+
+        <!-- Sección de Resultados o Últimos guardados -->
+        <section id="recent-section">
+          <h2 id="recent-section-title" class="section-title">Lo último que guardaste</h2>
+          <div id="recent-list" class="items-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Modal / Bottom Sheet Formulario -->
+    <div id="item-modal-overlay" class="modal-overlay">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2 id="modal-title" class="modal-title font-heading">Guardar nuevo</h2>
+          <button id="btn-close-modal" class="btn-icon" title="Cerrar">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <form id="item-form" onsubmit="return false;">
+          <div class="form-group">
+            <label for="item-url" class="form-label">Enlace (opcional para apuntes)</label>
+            <input
+              type="url"
+              id="item-url"
+              class="form-control"
+              placeholder="https://ejemplo.com/recurso"
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="item-title" class="form-label">Nombre o Título</label>
+            <input
+              type="text"
+              id="item-title"
+              class="form-control"
+              placeholder="Título descriptivo"
+              required
+              autocomplete="off"
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Tipo</label>
+            <div class="type-selector">
+              <button type="button" class="type-btn selected" data-type="link">Link</button>
+              <button type="button" class="type-btn" data-type="pagina">Página</button>
+              <button type="button" class="type-btn" data-type="archivo">Archivo</button>
+              <button type="button" class="type-btn" data-type="apunte">Apunte</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Etiquetas</label>
+            <div class="tags-input-container">
+              <div
+                id="selected-tags-wrap"
+                style="display: inline-flex; flex-wrap: wrap; gap: 4px"
+              ></div>
+              <input
+                type="text"
+                id="item-tag-input"
+                class="tag-text-input"
+                placeholder="Escribe y presiona Enter..."
+                autocomplete="off"
+              />
+            </div>
+            <div
+              id="suggested-tags-wrap"
+              style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px"
+            ></div>
+          </div>
+
+          <div class="form-group">
+            <label for="item-note" class="form-label">Nota o apunte</label>
+            <textarea
+              id="item-note"
+              class="form-control"
+              placeholder="Detalles, ideas o fragmentos importantes..."
+            ></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" id="btn-delete-item" class="btn-delete" style="display: none">
+              Borrar
+            </button>
+            <div style="display: flex; gap: 8px; margin-left: auto">
+              <button
+                type="button"
+                id="btn-save-item"
+                class="btn-primary"
+                style="padding: 10px 20px"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Contenedor de Toasts -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Script Principal de la App (Módulos ES nativos con ruta relativa) -->
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>
