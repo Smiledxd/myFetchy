@@ -1,14 +1,36 @@
 import { checkInitialSession, sendMagicLink, signOut } from "./auth.js";
-import { loadAll, saveItem, deleteItem, togglePin, markOpened } from "./data.js";
-import { renderItems, renderTagChips, filterItems } from "./ui/items.js";
+import {
+  loadAll,
+  saveItem,
+  deleteItem,
+  togglePin,
+  toggleArchive,
+  markOpened,
+  renameTag,
+  updateTagColor,
+  mergeTags,
+  deleteTag,
+  createCollection,
+  renameCollection,
+  updateCollectionColor,
+  deleteCollection,
+} from "./data.js";
+import { renderItems, renderTagChips, filterAndSortItems, escapeHTML } from "./ui/items.js";
 import { ItemModal } from "./ui/modal.js";
+import { ManagementModal } from "./ui/management.js";
 
 // Estado local reactivo
 let allItems = [];
 let allTags = [];
+let allCollections = [];
 let activeTag = null;
 let searchQuery = "";
+let collectionFilter = "todas";
+let typeFilter = "todos";
+let sortOrder = getSavedSortOrder();
+
 let itemModal = null;
+let mgmtModal = null;
 
 // Elementos de la interfaz
 const authView = document.getElementById("auth-view");
@@ -18,17 +40,40 @@ const loginEmailInput = document.getElementById("login-email");
 const loginBtn = document.getElementById("btn-login");
 const loginMsg = document.getElementById("login-msg");
 
+const btnMenu = document.getElementById("btn-menu");
+const menuDropdown = document.getElementById("header-menu-dropdown");
 const btnLogout = document.getElementById("btn-logout");
 const btnNewItem = document.getElementById("btn-new-item");
 const searchInput = document.getElementById("search-input");
 const searchClearBtn = document.getElementById("search-clear");
 const tagChipsWrap = document.getElementById("tag-chips-wrap");
 
+const filterCollectionSelect = document.getElementById("filter-collection");
+const filterTypeSelect = document.getElementById("filter-type");
+const filterSortSelect = document.getElementById("filter-sort");
+
 const pinnedSection = document.getElementById("pinned-section");
 const pinnedList = document.getElementById("pinned-list");
 const recentSectionTitle = document.getElementById("recent-section-title");
 const recentList = document.getElementById("recent-list");
 const toastContainer = document.getElementById("toast-container");
+
+// Manejo seguro de memoria en localStorage para el orden
+function getSavedSortOrder() {
+  try {
+    return localStorage.getItem("myfetchy_sort_order") || "recientes";
+  } catch {
+    return "recientes";
+  }
+}
+
+function saveSortOrder(order) {
+  try {
+    localStorage.setItem("myfetchy_sort_order", order);
+  } catch (err) {
+    console.warn("No se pudo guardar la preferencia en localStorage:", err);
+  }
+}
 
 // Sistema de Notificaciones Toast
 export function showToast(message, type = "info") {
@@ -48,31 +93,74 @@ export function showToast(message, type = "info") {
   }, 3500);
 }
 
-// Calcular contador de etiquetas basado en los items activos
-function getTagsWithCount(items) {
+// Calcular conteo y color de etiquetas solo para items no archivados
+function getTagsWithCount(items, tags) {
   const counts = new Map();
-  items.forEach((item) => {
-    (item.tags || []).forEach((t) => {
-      const lower = t.name.toLowerCase();
-      counts.set(lower, (counts.get(lower) || 0) + 1);
+  items
+    .filter((i) => !i.archived)
+    .forEach((item) => {
+      (item.tags || []).forEach((t) => {
+        const lower = t.name.toLowerCase();
+        counts.set(lower, (counts.get(lower) || 0) + 1);
+      });
     });
+
+  const tagsColorMap = new Map();
+  tags.forEach((t) => {
+    tagsColorMap.set(t.name.toLowerCase(), { name: t.name, color: t.color });
   });
 
   const list = [];
-  counts.forEach((count, name) => {
-    list.push({ name, count });
+  counts.forEach((count, lowerName) => {
+    const meta = tagsColorMap.get(lowerName);
+    list.push({
+      name: meta ? meta.name : lowerName,
+      count,
+      color: meta ? meta.color : "#2A4A8D",
+    });
   });
 
   return list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
-// Actualizar renderizado en pantalla
-function updateUI() {
-  const filtered = filterItems(allItems, searchQuery, activeTag);
-  const isFiltering = Boolean(searchQuery.trim() || activeTag);
+// Actualizar opciones en el selector de colecciones de la barra de filtros
+function updateFilterBarCollections() {
+  if (!filterCollectionSelect) return;
+  const currentVal = filterCollectionSelect.value;
+  const options = [
+    '<option value="todas">📁 Todas las colecciones</option>',
+    '<option value="sin-coleccion">Sin colección</option>',
+    ...allCollections.map((c) => `<option value="${c.id}">📁 ${escapeHTML(c.name)}</option>`),
+  ];
+  filterCollectionSelect.innerHTML = options.join("");
+  if (
+    allCollections.some((c) => c.id === currentVal) ||
+    ["todas", "sin-coleccion"].includes(currentVal)
+  ) {
+    filterCollectionSelect.value = currentVal;
+  } else {
+    filterCollectionSelect.value = "todas";
+    collectionFilter = "todas";
+  }
+}
 
-  // Render de chips de etiquetas
-  const tagsWithCount = getTagsWithCount(allItems);
+// Renderizado principal
+function updateUI() {
+  const filtered = filterAndSortItems(allItems, {
+    searchQuery,
+    activeTag,
+    collectionFilter,
+    typeFilter,
+    sortOrder,
+    showArchived: false,
+  });
+
+  const isFiltering = Boolean(
+    searchQuery.trim() || activeTag || collectionFilter !== "todas" || typeFilter !== "todos",
+  );
+
+  // Renderizar chips de etiquetas
+  const tagsWithCount = getTagsWithCount(allItems, allTags);
   renderTagChips(tagsWithCount, activeTag, tagChipsWrap, (selectedTag) => {
     activeTag = selectedTag;
     updateUI();
@@ -91,7 +179,7 @@ function updateUI() {
       }
     },
     onEditItem: (item) => {
-      itemModal.open(item, allTags);
+      itemModal.open(item, allTags, allCollections, allItems);
     },
     onCopyUrl: async (url) => {
       try {
@@ -104,33 +192,34 @@ function updateUI() {
   };
 
   if (isFiltering) {
-    // Vista con filtro activo
     pinnedSection.style.display = "none";
     recentSectionTitle.textContent = `${filtered.length} resultado${filtered.length === 1 ? "" : "s"}`;
-    renderItems(filtered, recentList, handlers);
+    renderItems(filtered, recentList, handlers, allCollections);
   } else {
-    // Vista normal: Fijados + Lo último que guardaste
-    const pinnedItems = allItems.filter((i) => i.pinned);
-    const unpinnedItems = allItems.filter((i) => !i.pinned);
+    const pinnedItems = filtered.filter((i) => i.pinned);
+    const unpinnedItems = filtered.filter((i) => !i.pinned);
 
     if (pinnedItems.length > 0) {
       pinnedSection.style.display = "block";
-      renderItems(pinnedItems, pinnedList, handlers);
+      renderItems(pinnedItems, pinnedList, handlers, allCollections);
     } else {
       pinnedSection.style.display = "none";
     }
 
     recentSectionTitle.textContent = "Lo último que guardaste";
-    renderItems(unpinnedItems, recentList, handlers);
+    renderItems(unpinnedItems, recentList, handlers, allCollections);
   }
 }
 
-// Carga inicial de datos
+// Carga inicial y recarga completa de datos
 async function fetchAppData() {
   const res = await loadAll();
   if (res.ok) {
     allItems = res.data.items || [];
     allTags = res.data.tags || [];
+    allCollections = res.data.collections || [];
+
+    updateFilterBarCollections();
     updateUI();
   } else {
     showToast(res.message, "error");
@@ -139,30 +228,159 @@ async function fetchAppData() {
 
 // Inicialización de la aplicación
 async function init() {
-  // Modal de agregar/editar
+  // Sincronizar selectores iniciales
+  if (filterSortSelect) {
+    filterSortSelect.value = sortOrder;
+  }
+
+  // Inicializar Modal de Gestión (Etiquetas, Colecciones, Archivados)
+  const mgmtOverlay = document.getElementById("mgmt-modal-overlay");
+  mgmtModal = new ManagementModal(mgmtOverlay, {
+    reloadAll: fetchAppData,
+    onUpdateTagColor: async (id, color) => {
+      const res = await updateTagColor(id, color);
+      if (res.ok) {
+        showToast("Color actualizado");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onRenameTag: async (id, newName) => {
+      const res = await renameTag(id, newName);
+      if (res.ok) {
+        showToast("Etiqueta renombrada");
+        fetchAppData();
+      } else if (!res.isDuplicate) {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onMergeTags: async (source, target) => {
+      const res = await mergeTags(source, target);
+      if (res.ok) {
+        showToast(`Etiquetas unidas en «#${target}»`);
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onDeleteTag: async (id) => {
+      const res = await deleteTag(id);
+      if (res.ok) {
+        showToast("Etiqueta eliminada");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onCreateCollection: async (name) => {
+      const res = await createCollection(name);
+      if (res.ok) {
+        showToast("Colección creada");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onRenameCollection: async (id, newName) => {
+      const res = await renameCollection(id, newName);
+      if (res.ok) {
+        showToast("Colección renombrada");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onUpdateCollectionColor: async (id, color) => {
+      const res = await updateCollectionColor(id, color);
+      if (res.ok) {
+        showToast("Color de colección actualizado");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onDeleteCollection: async (id) => {
+      const res = await deleteCollection(id);
+      if (res.ok) {
+        showToast("Colección eliminada");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onToggleArchive: async (id, currentArchived) => {
+      const res = await toggleArchive(id, currentArchived);
+      if (res.ok) {
+        showToast(currentArchived ? "Elemento restaurado" : "Elemento archivado");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onDelete: async (id) => {
+      const res = await deleteItem(id);
+      if (res.ok) {
+        showToast("Elemento eliminado");
+        fetchAppData();
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+  });
+
+  // Inicializar Modal de Guardar / Editar Item
   const modalOverlay = document.getElementById("item-modal-overlay");
   itemModal = new ItemModal(modalOverlay, {
     showToast,
+    onCreateCollection: async (name) => {
+      const res = await createCollection(name);
+      if (res.ok && res.data) {
+        allCollections.push(res.data);
+        updateFilterBarCollections();
+        showToast("Colección creada");
+      } else {
+        showToast(res.message, "error");
+      }
+      return res;
+    },
+    onViewItem: (existingItem) => {
+      itemModal.open(existingItem, allTags, allCollections, allItems);
+    },
+    onToggleArchive: async (id, currentArchived) => {
+      const res = await toggleArchive(id, currentArchived);
+      if (res.ok) {
+        showToast(currentArchived ? "Elemento restaurado" : "Elemento archivado");
+        const found = allItems.find((i) => i.id === id);
+        if (found) found.archived = !currentArchived;
+        updateUI();
+        return true;
+      } else {
+        showToast(res.message, "error");
+        return false;
+      }
+    },
     onSave: async (payload, tagNames) => {
       const res = await saveItem(payload, tagNames);
       if (res.ok) {
         showToast("Guardado correctamente");
-        // Actualizar lista local
         const idx = allItems.findIndex((i) => i.id === res.data.id);
         if (idx >= 0) {
           allItems[idx] = res.data;
         } else {
           allItems.unshift(res.data);
         }
-
-        // Actualizar catálogo de etiquetas
-        (res.data.tags || []).forEach((t) => {
-          if (!allTags.some((at) => at.name.toLowerCase() === t.name.toLowerCase())) {
-            allTags.push(t);
-          }
-        });
-
-        updateUI();
+        await fetchAppData();
         return true;
       } else {
         showToast(res.message, "error");
@@ -183,7 +401,49 @@ async function init() {
 
   // Botón guardar nuevo
   btnNewItem.addEventListener("click", () => {
-    itemModal.open(null, allTags);
+    itemModal.open(null, allTags, allCollections, allItems);
+  });
+
+  // Control del Menú Desplegable
+  btnMenu.addEventListener("click", (e) => {
+    e.stopPropagation();
+    menuDropdown.classList.toggle("open");
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!menuDropdown.contains(e.target) && e.target !== btnMenu) {
+      menuDropdown.classList.remove("open");
+    }
+  });
+
+  // Acciones del Menú Desplegable
+  menuDropdown.querySelectorAll("[data-mgmt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.mgmt;
+      menuDropdown.classList.remove("open");
+      mgmtModal.open(view, {
+        tags: allTags,
+        collections: allCollections,
+        items: allItems,
+      });
+    });
+  });
+
+  // Filtros de barra superior
+  filterCollectionSelect.addEventListener("change", () => {
+    collectionFilter = filterCollectionSelect.value;
+    updateUI();
+  });
+
+  filterTypeSelect.addEventListener("change", () => {
+    typeFilter = filterTypeSelect.value;
+    updateUI();
+  });
+
+  filterSortSelect.addEventListener("change", () => {
+    sortOrder = filterSortSelect.value;
+    saveSortOrder(sortOrder);
+    updateUI();
   });
 
   // Buscador interactivo
@@ -203,15 +463,19 @@ async function init() {
 
   // Atajos de teclado en PC (/ para buscar, Esc para limpiar o cerrar)
   window.addEventListener("keydown", (e) => {
-    const isInputActive = ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName);
+    const isInputActive = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
 
     if (e.key === "/" && !isInputActive) {
       e.preventDefault();
       searchInput.focus();
       searchInput.select();
     } else if (e.key === "Escape") {
-      if (modalOverlay.classList.contains("open")) {
+      if (menuDropdown.classList.contains("open")) {
+        menuDropdown.classList.remove("open");
+      } else if (modalOverlay.classList.contains("open")) {
         itemModal.close();
+      } else if (mgmtOverlay.classList.contains("open")) {
+        mgmtModal.close();
       } else if (searchInput.value) {
         searchInput.value = "";
         searchQuery = "";
@@ -245,6 +509,7 @@ async function init() {
 
   // Botón salir
   btnLogout.addEventListener("click", async () => {
+    menuDropdown.classList.remove("open");
     await signOut();
   });
 
@@ -259,8 +524,11 @@ async function init() {
       authView.style.display = "flex";
       allItems = [];
       allTags = [];
+      allCollections = [];
       activeTag = null;
       searchQuery = "";
+      collectionFilter = "todas";
+      typeFilter = "todos";
     }
   });
 

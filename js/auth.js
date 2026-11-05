@@ -21,13 +21,26 @@ export async function sendMagicLink(email) {
   const { error } = await supabase.auth.signInWithOtp({
     email: trimmed,
     options: {
-      shouldCreateUser: true,
+      shouldCreateUser: false,
       emailRedirectTo: cleanUrl,
     },
   });
 
   if (error) {
+    console.error("Error al solicitar enlace de acceso:", error);
     const msg = error.message ? error.message.toLowerCase() : "";
+
+    // Usuario no registrado o signups bloqueados
+    if (
+      msg.includes("signups not allowed") ||
+      msg.includes("user not found") ||
+      msg.includes("signup disabled") ||
+      msg.includes("otp disabled") ||
+      error.status === 400
+    ) {
+      return { ok: false, message: "Este correo no tiene acceso." };
+    }
+
     if (
       error.status === 429 ||
       msg.includes("rate limit") ||
@@ -38,9 +51,14 @@ export async function sendMagicLink(email) {
         message: "Muchos intentos seguidos. Espera unos minutos y vuelve a intentar.",
       };
     }
+
+    if (msg.includes("fetch") || msg.includes("network")) {
+      return { ok: false, message: "No hay conexión con el servidor. Revisa tu internet." };
+    }
+
     return {
       ok: false,
-      message: error.message || "No se pudo enviar el link. Revisa tu internet.",
+      message: "No se pudo enviar el link. Revisa tu correo e intenta de nuevo.",
     };
   }
 
@@ -71,7 +89,8 @@ export async function checkInitialSession(onSessionChange) {
     error,
   } = await supabase.auth.getSession();
   if (error) {
-    return { session: null, error: error.message };
+    console.error("Error obteniendo sesión inicial:", error);
+    return { session: null, error: "No se pudo validar la sesión. Intenta de nuevo." };
   }
 
   if (session?.user) {
@@ -83,14 +102,21 @@ export async function checkInitialSession(onSessionChange) {
     onSessionChange(null);
   }
 
-  supabase.auth.onAuthStateChange((_event, newSession) => {
-    if (newSession?.user) {
-      currentUser = newSession.user;
+  // Escuchar cambios de autenticación ignorando renovaciones periódicas de token
+  supabase.auth.onAuthStateChange((event, newSession) => {
+    if (event === "TOKEN_REFRESHED") {
+      if (newSession?.user) currentUser = newSession.user;
+      return;
+    }
+
+    const newUser = newSession?.user || null;
+    const prevUserId = currentUser?.id || null;
+    const nextUserId = newUser?.id || null;
+
+    if (prevUserId !== nextUserId) {
+      currentUser = newUser;
       cleanUrlTokens();
       onSessionChange(currentUser);
-    } else {
-      currentUser = null;
-      onSessionChange(null);
     }
   });
 
