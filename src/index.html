@@ -76,20 +76,93 @@
                 </svg>
                 Guardar
               </button>
-              <button id="btn-logout" class="btn-icon" title="Cerrar sesión">
+
+              <!-- Botón Menú con Dropdown -->
+              <button id="btn-menu" class="btn-icon" title="Opciones y gestión">
                 <svg
-                  width="18"
-                  height="18"
+                  width="20"
+                  height="20"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
                 >
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                  <polyline points="16 17 21 12 16 7"></polyline>
-                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                  <line x1="3" y1="12" x2="21" y2="12"></line>
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <line x1="3" y1="18" x2="21" y2="18"></line>
                 </svg>
               </button>
+
+              <!-- Menú Desplegable -->
+              <div id="header-menu-dropdown" class="menu-dropdown">
+                <button type="button" class="menu-item" data-mgmt="tags">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"
+                    ></path>
+                    <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                  </svg>
+                  Etiquetas
+                </button>
+                <button type="button" class="menu-item" data-mgmt="collections">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                    ></path>
+                  </svg>
+                  Colecciones
+                </button>
+                <button type="button" class="menu-item" data-mgmt="archived">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="21 8 21 21 3 21 3 8"></polyline>
+                    <rect x="1" y="3" width="22" height="5"></rect>
+                    <line x1="10" y1="12" x2="14" y2="12"></line>
+                  </svg>
+                  Archivados
+                </button>
+                <div class="menu-divider"></div>
+                <button
+                  type="button"
+                  id="btn-logout"
+                  class="menu-item"
+                  style="color: var(--danger-color)"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  Salir
+                </button>
+              </div>
             </div>
           </div>
 
@@ -130,6 +203,31 @@
             <span class="search-shortcut-hint">/</span>
           </div>
         </div>
+
+        <!-- Barra de Filtros Compacta de una sola fila -->
+        <div class="container">
+          <div class="filter-bar-wrap">
+            <select id="filter-collection" class="filter-select" title="Filtrar por colección">
+              <option value="todas">📁 Todas las colecciones</option>
+              <option value="sin-coleccion">Sin colección</option>
+            </select>
+
+            <select id="filter-type" class="filter-select" title="Filtrar por tipo">
+              <option value="todos">Todos los tipos</option>
+              <option value="link">Links</option>
+              <option value="pagina">Páginas</option>
+              <option value="archivo">Archivos</option>
+              <option value="apunte">Apuntes</option>
+            </select>
+
+            <select id="filter-sort" class="filter-select" title="Ordenar por">
+              <option value="recientes">Más recientes</option>
+              <option value="edicion">Última edición</option>
+              <option value="abierto">Último abierto</option>
+              <option value="nombre">Nombre A-Z</option>
+            </select>
+          </div>
+        </div>
       </header>
 
       <!-- Barra de Filtros por Etiqueta -->
@@ -168,7 +266,7 @@
       </main>
     </div>
 
-    <!-- Modal / Bottom Sheet Formulario -->
+    <!-- Modal / Bottom Sheet Formulario de Item -->
     <div id="item-modal-overlay" class="modal-overlay">
       <div class="modal-sheet">
         <div class="modal-header">
@@ -188,14 +286,17 @@
           </button>
         </div>
 
+        <!-- Aviso de Enlace Duplicado -->
+        <div id="duplicate-notice" style="display: none"></div>
+
         <form id="item-form" onsubmit="return false;">
           <div class="form-group">
             <label for="item-url" class="form-label">Enlace (opcional para apuntes)</label>
             <input
-              type="url"
+              type="text"
               id="item-url"
               class="form-control"
-              placeholder="https://ejemplo.com/recurso"
+              placeholder="github.com/usuario o https://..."
               autocomplete="off"
             />
           </div>
@@ -210,6 +311,13 @@
               required
               autocomplete="off"
             />
+          </div>
+
+          <div class="form-group">
+            <label for="item-collection" class="form-label">Colección</label>
+            <select id="item-collection" class="form-control">
+              <option value="">Sin colección</option>
+            </select>
           </div>
 
           <div class="form-group">
@@ -253,9 +361,19 @@
           </div>
 
           <div class="modal-actions">
-            <button type="button" id="btn-delete-item" class="btn-delete" style="display: none">
-              Borrar
-            </button>
+            <div style="display: flex; gap: 6px">
+              <button type="button" id="btn-delete-item" class="btn-delete" style="display: none">
+                Borrar
+              </button>
+              <button
+                type="button"
+                id="btn-archive-item"
+                class="btn-secondary"
+                style="display: none"
+              >
+                Archivar
+              </button>
+            </div>
             <div style="display: flex; gap: 8px; margin-left: auto">
               <button
                 type="button"
@@ -268,6 +386,29 @@
             </div>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- Modal de Gestión (Etiquetas, Colecciones, Archivados) -->
+    <div id="mgmt-modal-overlay" class="modal-overlay">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <h2 id="mgmt-title" class="modal-title font-heading">Gestión</h2>
+          <button id="btn-close-mgmt" class="btn-icon" title="Cerrar">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div id="mgmt-body"></div>
       </div>
     </div>
 
