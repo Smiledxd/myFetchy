@@ -16,7 +16,7 @@ import {
   deleteCollection,
 } from "./data.js";
 import { renderItems, renderTagChips, filterAndSortItems, escapeHTML } from "./ui/items.js";
-import { ItemModal } from "./ui/modal.js";
+import { ItemModal, detectTypeFromUrl } from "./ui/modal.js";
 import { ManagementModal } from "./ui/management.js";
 
 // Estado local reactivo
@@ -28,9 +28,11 @@ let searchQuery = "";
 let collectionFilter = "todas";
 let typeFilter = "todos";
 let sortOrder = getSavedSortOrder();
+let isOffline = !navigator.onLine;
 
 let itemModal = null;
 let mgmtModal = null;
+let deferredInstallPrompt = null;
 
 // Elementos de la interfaz
 const authView = document.getElementById("auth-view");
@@ -42,11 +44,13 @@ const loginMsg = document.getElementById("login-msg");
 
 const btnMenu = document.getElementById("btn-menu");
 const menuDropdown = document.getElementById("header-menu-dropdown");
+const menuItemInstall = document.getElementById("menu-item-install");
 const btnLogout = document.getElementById("btn-logout");
 const btnNewItem = document.getElementById("btn-new-item");
 const searchInput = document.getElementById("search-input");
 const searchClearBtn = document.getElementById("search-clear");
 const tagChipsWrap = document.getElementById("tag-chips-wrap");
+const offlineBanner = document.getElementById("offline-banner");
 
 const filterCollectionSelect = document.getElementById("filter-collection");
 const filterTypeSelect = document.getElementById("filter-type");
@@ -75,22 +79,49 @@ function saveSortOrder(order) {
   }
 }
 
-// Sistema de Notificaciones Toast
-export function showToast(message, type = "info") {
+// Sistema de Notificaciones Toast con soporte para botones de acción
+export function showToast(message, type = "info", action = null) {
   if (!toastContainer) return;
 
   const toast = document.createElement("div");
   toast.className = `toast ${type === "error" ? "error" : ""}`;
-  toast.textContent = message;
+
+  const textSpan = document.createElement("span");
+  textSpan.textContent = message;
+  toast.appendChild(textSpan);
+
+  if (action && action.text && action.onClick) {
+    const actionBtn = document.createElement("button");
+    actionBtn.className = "toast-btn";
+    actionBtn.textContent = action.text;
+    actionBtn.onclick = () => {
+      action.onClick();
+      toast.remove();
+    };
+    toast.appendChild(actionBtn);
+  }
 
   toastContainer.appendChild(toast);
 
+  const duration = action ? 8000 : 3500;
   setTimeout(() => {
     toast.style.opacity = "0";
     toast.style.transform = "translateY(10px)";
     toast.style.transition = "all 0.2s ease";
     setTimeout(() => toast.remove(), 200);
-  }, 3500);
+  }, duration);
+}
+
+// Control del estado visual de Modo Sin Conexión
+function setOfflineMode(offline) {
+  isOffline = offline;
+  if (offlineBanner) {
+    offlineBanner.style.display = offline ? "flex" : "none";
+  }
+  document.body.classList.toggle("offline-mode", offline);
+  if (btnNewItem) {
+    btnNewItem.disabled = offline;
+  }
 }
 
 // Calcular conteo y color de etiquetas solo para items no archivados
@@ -169,6 +200,10 @@ function updateUI() {
   const handlers = {
     onOpenLink: (id) => markOpened(id),
     onTogglePin: async (id, currentPinned) => {
+      if (isOffline) {
+        showToast("No disponible sin conexión.", "error");
+        return;
+      }
       const res = await togglePin(id, currentPinned);
       if (res.ok) {
         const item = allItems.find((i) => i.id === id);
@@ -179,6 +214,10 @@ function updateUI() {
       }
     },
     onEditItem: (item) => {
+      if (isOffline) {
+        showToast("No se puede editar sin conexión.", "error");
+        return;
+      }
       itemModal.open(item, allTags, allCollections, allItems);
     },
     onCopyUrl: async (url) => {
@@ -219,23 +258,176 @@ async function fetchAppData() {
     allTags = res.data.tags || [];
     allCollections = res.data.collections || [];
 
+    setOfflineMode(Boolean(res.isOffline));
     updateFilterBarCollections();
     updateUI();
   } else {
+    setOfflineMode(true);
     showToast(res.message, "error");
   }
 }
 
+// Procesar datos compartidos desde Android vía share_target
+function checkAndroidShareTarget() {
+  if (!window.location.search) return null;
+
+  const params = new URLSearchParams(window.location.search);
+  const rawUrl = params.get("url");
+  const rawText = params.get("text");
+  const rawTitle = params.get("title");
+
+  if (!rawUrl && !rawText && !rawTitle) return null;
+
+  let targetUrl = rawUrl ? rawUrl.trim() : null;
+  let targetTitle = rawTitle ? rawTitle.trim() : "";
+  let note = "";
+
+  // Si url vino vacía, buscar el primer http(s):// dentro de text
+  if (!targetUrl && rawText) {
+    const urlMatch = rawText.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      targetUrl = urlMatch[0];
+      const remaining = rawText.replace(urlMatch[0], "").trim();
+      if (!targetTitle) {
+        targetTitle = remaining;
+      } else {
+        note = remaining;
+      }
+    } else {
+      if (!targetTitle) targetTitle = rawText.slice(0, 40);
+      note = rawText;
+    }
+  }
+
+  // Limpiar URL inmediatamente
+  window.history.replaceState(
+    {},
+    document.title,
+    window.location.origin + window.location.pathname,
+  );
+
+  return { url: targetUrl, title: targetTitle, note };
+}
+
+// Abrir formulario con datos compartidos
+function handleSharedData(shareData) {
+  if (!shareData) return;
+  const detectedType = detectTypeFromUrl(shareData.url);
+  itemModal.open(
+    {
+      url: shareData.url,
+      title: shareData.title,
+      note: shareData.note,
+      type: detectedType,
+    },
+    allTags,
+    allCollections,
+    allItems,
+  );
+}
+
+// Registro del Service Worker y detección de actualizaciones
+function setupServiceWorker() {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker
+      .register("./sw.js")
+      .then((reg) => {
+        if (reg.waiting) {
+          notifyWorkerUpdate(reg.waiting);
+        }
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          if (newWorker) {
+            newWorker.addEventListener("statechange", () => {
+              if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+                notifyWorkerUpdate(newWorker);
+              }
+            });
+          }
+        });
+      })
+      .catch((err) => {
+        console.warn("Fallo registrando Service Worker:", err);
+      });
+
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
+  }
+}
+
+function notifyWorkerUpdate(worker) {
+  // Verificar que el usuario no esté en medio de editar o escribir
+  const modalOpen = document.querySelector(".modal-overlay.open");
+  if (modalOpen) return;
+
+  showToast("Hay una versión nueva de myFetchy.", "info", {
+    text: "Actualizar",
+    onClick: () => {
+      worker.postMessage({ type: "SKIP_WAITING" });
+    },
+  });
+}
+
 // Inicialización de la aplicación
 async function init() {
-  // Sincronizar selectores iniciales
   if (filterSortSelect) {
     filterSortSelect.value = sortOrder;
   }
 
+  // Inicializar Service Worker
+  setupServiceWorker();
+
+  // Escucha de conexión Online / Offline
+  window.addEventListener("online", () => {
+    setOfflineMode(false);
+    showToast("Conexión restablecida.");
+    fetchAppData();
+  });
+
+  window.addEventListener("offline", () => {
+    setOfflineMode(true);
+    showToast("Sin conexión. Estás en modo lectura.", "error");
+  });
+
+  // Capturar evento de instalación de PWA
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    if (menuItemInstall) menuItemInstall.style.display = "flex";
+  });
+
+  if (menuItemInstall) {
+    menuItemInstall.addEventListener("click", async () => {
+      menuDropdown.classList.remove("open");
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        if (outcome === "accepted") {
+          menuItemInstall.style.display = "none";
+        }
+        deferredInstallPrompt = null;
+      }
+    });
+  }
+
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    if (menuItemInstall) menuItemInstall.style.display = "none";
+    showToast("myFetchy se instaló correctamente.");
+  });
+
+  // Extraer datos compartidos de Android
+  const sharedFromAndroid = checkAndroidShareTarget();
+
   // Inicializar Modal de Gestión (Etiquetas, Colecciones, Archivados)
   const mgmtOverlay = document.getElementById("mgmt-modal-overlay");
   mgmtModal = new ManagementModal(mgmtOverlay, {
+    showToast,
     reloadAll: fetchAppData,
     onUpdateTagColor: async (id, color) => {
       const res = await updateTagColor(id, color);
@@ -257,10 +449,11 @@ async function init() {
       }
       return res;
     },
-    onMergeTags: async (source, target) => {
-      const res = await mergeTags(source, target);
+    onMergeTags: async (sourceId, targetId) => {
+      // Pasar UUIDs a data.js
+      const res = await mergeTags(sourceId, targetId);
       if (res.ok) {
-        showToast(`Etiquetas unidas en «#${target}»`);
+        showToast("Etiquetas unidas exitosamente");
         fetchAppData();
       } else {
         showToast(res.message, "error");
@@ -399,12 +592,14 @@ async function init() {
     },
   });
 
-  // Botón guardar nuevo
   btnNewItem.addEventListener("click", () => {
+    if (isOffline) {
+      showToast("No disponible sin conexión.", "error");
+      return;
+    }
     itemModal.open(null, allTags, allCollections, allItems);
   });
 
-  // Control del Menú Desplegable
   btnMenu.addEventListener("click", (e) => {
     e.stopPropagation();
     menuDropdown.classList.toggle("open");
@@ -416,7 +611,6 @@ async function init() {
     }
   });
 
-  // Acciones del Menú Desplegable
   menuDropdown.querySelectorAll("[data-mgmt]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const view = btn.dataset.mgmt;
@@ -429,7 +623,6 @@ async function init() {
     });
   });
 
-  // Filtros de barra superior
   filterCollectionSelect.addEventListener("change", () => {
     collectionFilter = filterCollectionSelect.value;
     updateUI();
@@ -446,7 +639,6 @@ async function init() {
     updateUI();
   });
 
-  // Buscador interactivo
   searchInput.addEventListener("input", () => {
     searchQuery = searchInput.value;
     searchClearBtn.classList.toggle("visible", searchQuery.length > 0);
@@ -461,7 +653,6 @@ async function init() {
     updateUI();
   });
 
-  // Atajos de teclado en PC (/ para buscar, Esc para limpiar o cerrar)
   window.addEventListener("keydown", (e) => {
     const isInputActive = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName);
 
@@ -486,7 +677,6 @@ async function init() {
     }
   });
 
-  // Formulario de login
   loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = loginEmailInput.value;
@@ -507,7 +697,6 @@ async function init() {
     }
   });
 
-  // Botón salir
   btnLogout.addEventListener("click", async () => {
     menuDropdown.classList.remove("open");
     await signOut();
@@ -518,7 +707,24 @@ async function init() {
     if (user) {
       authView.style.display = "none";
       appView.style.display = "block";
-      fetchAppData();
+      fetchAppData().then(() => {
+        // Si había un share pendiente de Android antes del login
+        try {
+          const pending = sessionStorage.getItem("myfetchy_pending_share");
+          if (pending) {
+            sessionStorage.removeItem("myfetchy_pending_share");
+            handleSharedData(JSON.parse(pending));
+            return;
+          }
+        } catch (e) {
+          console.warn("Error leyendo share pendiente:", e);
+        }
+
+        // Si se compartió directo con sesión activa
+        if (sharedFromAndroid) {
+          handleSharedData(sharedFromAndroid);
+        }
+      });
     } else {
       appView.style.display = "none";
       authView.style.display = "flex";
@@ -529,6 +735,16 @@ async function init() {
       searchQuery = "";
       collectionFilter = "todas";
       typeFilter = "todos";
+
+      // Si se compartió sin sesión, guardar en sessionStorage
+      if (sharedFromAndroid) {
+        try {
+          sessionStorage.setItem("myfetchy_pending_share", JSON.stringify(sharedFromAndroid));
+          showToast("Inicia sesión para guardar el enlace compartido.");
+        } catch (e) {
+          console.warn("Error guardando share pendiente:", e);
+        }
+      }
     }
   });
 
@@ -538,7 +754,6 @@ async function init() {
   }
 }
 
-// Arrancar al cargar el DOM
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", init);
 } else {

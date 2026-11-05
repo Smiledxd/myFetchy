@@ -23,7 +23,7 @@ function parseErrorMessage(error, defaultMsg = "Ocurrió un error. Revisa tu int
   return defaultMsg;
 }
 
-// Cargar todos los datos del usuario (items activos y archivados, tags, relaciones y colecciones)
+// Cargar todos los datos del usuario con respaldo offline en localStorage
 export async function loadAll() {
   try {
     const [itemsRes, tagsRes, itemTagsRes, collectionsRes] = await Promise.all([
@@ -59,18 +59,43 @@ export async function loadAll() {
       tags: itemTagsMap.get(item.id) || [],
     }));
 
+    const resultData = {
+      items,
+      tags: tagsRes.data || [],
+      collections: collectionsRes.data || [],
+    };
+
+    // Guardar copia de seguridad en localStorage
+    try {
+      localStorage.setItem("myfetchy_cached_data", JSON.stringify(resultData));
+    } catch (e) {
+      console.warn("No se pudo guardar la copia en localStorage:", e);
+    }
+
     return {
       ok: true,
-      data: {
-        items,
-        tags: tagsRes.data || [],
-        collections: collectionsRes.data || [],
-      },
+      data: resultData,
+      isOffline: false,
     };
   } catch (err) {
+    // Si no hay red, recuperar la última copia local guardada
+    try {
+      const cached = localStorage.getItem("myfetchy_cached_data");
+      if (cached) {
+        return {
+          ok: true,
+          data: JSON.parse(cached),
+          isOffline: true,
+        };
+      }
+    } catch (e) {
+      console.warn("Error leyendo respaldo offline de localStorage:", e);
+    }
+
     return {
       ok: false,
       message: parseErrorMessage(err, "No se pudieron cargar los datos. Revisa tu internet."),
+      isOffline: !navigator.onLine,
     };
   }
 }
@@ -78,7 +103,6 @@ export async function loadAll() {
 // Guardar o actualizar un item utilizando el RPC set_item_tags
 export async function saveItem(itemInput, tagNames = []) {
   try {
-    // Normalizar etiquetas preservando mayúsculas originales pero sin duplicar
     const seenLower = new Set();
     const cleanTagNames = [];
     for (const raw of tagNames) {
@@ -90,7 +114,6 @@ export async function saveItem(itemInput, tagNames = []) {
       }
     }
 
-    // Nota siempre vacía '' por defecto, nunca null
     const payload = {
       title: itemInput.title.trim(),
       url: itemInput.url ? itemInput.url.trim() : null,
@@ -112,13 +135,12 @@ export async function saveItem(itemInput, tagNames = []) {
       if (error) throw error;
       savedItem = data;
     } else {
-      // Sin user_id manual desde el cliente
       const { data, error } = await supabase.from("items").insert(payload).select().single();
       if (error) throw error;
       savedItem = data;
     }
 
-    // Guardar etiquetas en un solo paso mediante RPC
+    // Sincronizar etiquetas de forma atómica mediante RPC
     const { error: rpcErr } = await supabase.rpc("set_item_tags", {
       p_item_id: savedItem.id,
       p_tag_names: cleanTagNames,
@@ -129,7 +151,6 @@ export async function saveItem(itemInput, tagNames = []) {
       throw rpcErr;
     }
 
-    // Cargar etiquetas resueltas para devolver el item completo
     const { data: itemTagsRel, error: relErr } = await supabase
       .from("item_tags")
       .select("tags (id, name, color)")
@@ -227,7 +248,7 @@ export async function markOpened(itemId) {
 
 // ================= GESTIÓN DE ETIQUETAS =================
 
-// Renombrar etiqueta (maneja error 23505)
+// Renombrar etiqueta (sin updated_at porque tags no tiene esa columna)
 export async function renameTag(tagId, newName) {
   try {
     const trimmed = (newName || "").trim();
@@ -237,7 +258,7 @@ export async function renameTag(tagId, newName) {
 
     const { data, error } = await supabase
       .from("tags")
-      .update({ name: trimmed, updated_at: new Date().toISOString() })
+      .update({ name: trimmed })
       .eq("id", tagId)
       .select()
       .single();
@@ -262,12 +283,12 @@ export async function renameTag(tagId, newName) {
   }
 }
 
-// Cambiar color de etiqueta
+// Cambiar color de etiqueta (sin updated_at)
 export async function updateTagColor(tagId, color) {
   try {
     const { data, error } = await supabase
       .from("tags")
-      .update({ color, updated_at: new Date().toISOString() })
+      .update({ color })
       .eq("id", tagId)
       .select()
       .single();
@@ -282,12 +303,12 @@ export async function updateTagColor(tagId, color) {
   }
 }
 
-// Unir etiqueta origen con destino mediante RPC merge_tags
-export async function mergeTags(sourceName, targetName) {
+// Unir etiqueta origen con destino mediante RPC merge_tags pasando UUIDs
+export async function mergeTags(sourceTagId, targetTagId) {
   try {
     const { error } = await supabase.rpc("merge_tags", {
-      source: sourceName,
-      target: targetName,
+      source: sourceTagId,
+      target: targetTagId,
     });
 
     if (error) throw error;
@@ -300,7 +321,7 @@ export async function mergeTags(sourceName, targetName) {
   }
 }
 
-// Borrar etiqueta (desvincula de items, los items no se borran)
+// Borrar etiqueta (desvincula de items)
 export async function deleteTag(tagId) {
   try {
     const { error } = await supabase.from("tags").delete().eq("id", tagId);
@@ -317,7 +338,7 @@ export async function deleteTag(tagId) {
 
 // ================= GESTIÓN DE COLECCIONES =================
 
-// Crear colección
+// Crear colección (sin updated_at)
 export async function createCollection(name, color = "#2A4A8D") {
   try {
     const trimmed = (name || "").trim();
@@ -347,7 +368,7 @@ export async function createCollection(name, color = "#2A4A8D") {
   }
 }
 
-// Renombrar colección
+// Renombrar colección (sin updated_at)
 export async function renameCollection(id, newName) {
   try {
     const trimmed = (newName || "").trim();
@@ -357,7 +378,7 @@ export async function renameCollection(id, newName) {
 
     const { data, error } = await supabase
       .from("collections")
-      .update({ name: trimmed, updated_at: new Date().toISOString() })
+      .update({ name: trimmed })
       .eq("id", id)
       .select()
       .single();
@@ -378,12 +399,12 @@ export async function renameCollection(id, newName) {
   }
 }
 
-// Cambiar color de colección
+// Cambiar color de colección (sin updated_at)
 export async function updateCollectionColor(id, color) {
   try {
     const { data, error } = await supabase
       .from("collections")
-      .update({ color, updated_at: new Date().toISOString() })
+      .update({ color })
       .eq("id", id)
       .select()
       .single();
@@ -398,7 +419,7 @@ export async function updateCollectionColor(id, color) {
   }
 }
 
-// Borrar colección (los items pasan automáticamente a sin colección)
+// Borrar colección (items pasan automáticamente a sin colección)
 export async function deleteCollection(id) {
   try {
     const { error } = await supabase.from("collections").delete().eq("id", id);

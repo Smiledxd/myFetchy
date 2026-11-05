@@ -21,6 +21,8 @@ export class ManagementModal {
     this.allTags = [];
     this.allCollections = [];
     this.allItems = [];
+    this.activeInlineEditId = null;
+    this.activeInlineMergeId = null;
 
     this.initDOM();
   }
@@ -46,6 +48,8 @@ export class ManagementModal {
     this.allTags = tags;
     this.allCollections = collections;
     this.allItems = items;
+    this.activeInlineEditId = null;
+    this.activeInlineMergeId = null;
 
     this.render();
     this.overlay.classList.add("open");
@@ -56,6 +60,8 @@ export class ManagementModal {
     this.overlay.classList.remove("open");
     document.body.style.overflow = "";
     this.currentView = null;
+    this.activeInlineEditId = null;
+    this.activeInlineMergeId = null;
   }
 
   render() {
@@ -72,7 +78,6 @@ export class ManagementModal {
   renderTagsView() {
     this.modalTitle.textContent = "Gestión de Etiquetas";
 
-    // Calcular cuántos items tiene cada etiqueta
     const counts = new Map();
     this.allItems.forEach((item) => {
       (item.tags || []).forEach((t) => {
@@ -97,35 +102,80 @@ export class ManagementModal {
           .map((t) => {
             const count = counts.get(t.id) || counts.get(t.name.toLowerCase()) || 0;
             const currentColor = t.color || "#2A4A8D";
+            const isEditing = this.activeInlineEditId === t.id;
+            const isMerging = this.activeInlineMergeId === t.id;
+            const otherTags = this.allTags.filter((ot) => ot.id !== t.id);
 
             return `
             <div class="mgmt-row" data-tag-id="${t.id}" data-tag-name="${escapeHTML(t.name)}">
-              <div class="mgmt-row-main">
-                <span class="mgmt-color-dot" style="background-color: ${escapeHTML(currentColor)};"></span>
-                <span class="mgmt-row-name" data-role="name-display">#${escapeHTML(t.name)}</span>
-                <span class="chip-count">${count}</span>
-              </div>
+              <!-- Vista normal o edición de nombre inline -->
+              ${
+                isEditing
+                  ? `
+                <div class="inline-edit-box">
+                  <input type="text" class="form-control inline-rename-input" value="${escapeHTML(t.name)}" autocomplete="off">
+                  <div class="inline-edit-actions">
+                    <button type="button" class="btn-sm btn-primary" data-action="save-inline-rename">Guardar</button>
+                    <button type="button" class="btn-sm btn-secondary" data-action="cancel-inline">Cancelar</button>
+                  </div>
+                </div>
+                <div class="inline-collision-box" style="display: none;"></div>
+              `
+                  : `
+                <div class="mgmt-row-main">
+                  <span class="mgmt-color-dot" style="background-color: ${escapeHTML(currentColor)};"></span>
+                  <span class="mgmt-row-name">#${escapeHTML(t.name)}</span>
+                  <span class="chip-count">${count}</span>
+                </div>
 
-              <!-- Paleta de 8 colores compacta -->
-              <div class="palette-bar">
-                ${PALETTE_COLORS.map(
-                  (c) => `
-                  <button type="button" class="palette-swatch ${c === currentColor ? "selected" : ""}" style="background-color: ${c};" data-action="pick-color" data-color="${c}" title="Cambiar color"></button>
-                `,
-                ).join("")}
-              </div>
+                <!-- Paleta de 8 colores compacta -->
+                <div class="palette-bar">
+                  ${PALETTE_COLORS.map(
+                    (c) => `
+                    <button type="button" class="palette-swatch ${c === currentColor ? "selected" : ""}" style="background-color: ${c};" data-action="pick-color" data-color="${c}" title="Cambiar color"></button>
+                  `,
+                  ).join("")}
+                </div>
 
-              <div class="mgmt-row-actions">
-                <button type="button" class="btn-sm btn-secondary" data-action="rename-tag" title="Renombrar">
-                  Renombrar
-                </button>
-                <button type="button" class="btn-sm btn-secondary" data-action="merge-tag" title="Unir con otra">
-                  Unir
-                </button>
-                <button type="button" class="btn-sm btn-delete" data-action="delete-tag" data-count="${count}" title="Borrar">
-                  Borrar
-                </button>
-              </div>
+                <div class="mgmt-row-actions">
+                  <button type="button" class="btn-sm btn-secondary" data-action="start-rename-tag">
+                    Renombrar
+                  </button>
+                  <button type="button" class="btn-sm btn-secondary" data-action="start-merge-tag">
+                    Unir
+                  </button>
+                  <button type="button" class="btn-sm btn-delete" data-action="delete-tag" data-count="${count}">
+                    Borrar
+                  </button>
+                </div>
+              `
+              }
+
+              <!-- Vista de unión inline -->
+              ${
+                isMerging
+                  ? `
+                <div class="inline-merge-box">
+                  <p style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">
+                    Unir «#${escapeHTML(t.name)}» en:
+                  </p>
+                  <select class="form-control inline-target-select" style="margin-bottom: 8px;">
+                    ${otherTags
+                      .map(
+                        (ot) => `
+                      <option value="${ot.id}">#${escapeHTML(ot.name)} (${counts.get(ot.id) || 0} items)</option>
+                    `,
+                      )
+                      .join("")}
+                  </select>
+                  <div class="inline-edit-actions">
+                    <button type="button" class="btn-sm btn-primary" data-action="confirm-merge-tag">Unir en esta</button>
+                    <button type="button" class="btn-sm btn-secondary" data-action="cancel-inline">Cancelar</button>
+                  </div>
+                </div>
+              `
+                  : ""
+              }
             </div>
           `;
           })
@@ -135,7 +185,15 @@ export class ManagementModal {
 
     this.modalBody.innerHTML = html;
 
-    // Delegación de eventos para etiquetas
+    // Foco automático en el input de renombrar si está activo
+    if (this.activeInlineEditId) {
+      const activeInput = this.modalBody.querySelector(".inline-rename-input");
+      if (activeInput) {
+        activeInput.focus();
+        activeInput.select();
+      }
+    }
+
     this.modalBody.onclick = async (e) => {
       const btn = e.target.closest("[data-action]");
       if (!btn) return;
@@ -145,7 +203,108 @@ export class ManagementModal {
       const tagName = row.dataset.tagName;
       const action = btn.dataset.action;
 
-      if (action === "pick-color") {
+      if (action === "cancel-inline") {
+        this.activeInlineEditId = null;
+        this.activeInlineMergeId = null;
+        this.renderTagsView();
+      } else if (action === "start-rename-tag") {
+        this.activeInlineEditId = tagId;
+        this.activeInlineMergeId = null;
+        this.renderTagsView();
+      } else if (action === "start-merge-tag") {
+        const otherTags = this.allTags.filter((ot) => ot.id !== tagId);
+        if (otherTags.length === 0) {
+          if (this.options.showToast) {
+            this.options.showToast("No hay otras etiquetas para unir.");
+          }
+          return;
+        }
+        this.activeInlineMergeId = tagId;
+        this.activeInlineEditId = null;
+        this.renderTagsView();
+      } else if (action === "save-inline-rename") {
+        const input = row.querySelector(".inline-rename-input");
+        const newName = input.value.trim();
+        if (!newName || newName === tagName) {
+          this.activeInlineEditId = null;
+          this.renderTagsView();
+          return;
+        }
+
+        if (this.options.onRenameTag) {
+          btn.disabled = true;
+          const res = await this.options.onRenameTag(tagId, newName);
+          btn.disabled = false;
+
+          if (res.ok) {
+            this.activeInlineEditId = null;
+            const found = this.allTags.find((t) => t.id === tagId);
+            if (found) found.name = newName;
+            this.renderTagsView();
+          } else if (res.isDuplicate) {
+            // Mostrar diálogo inline de unión sin confirm() nativo
+            const collisionBox = row.querySelector(".inline-collision-box");
+            if (collisionBox) {
+              const targetTag = this.allTags.find(
+                (t) => t.name.toLowerCase() === newName.toLowerCase(),
+              );
+              collisionBox.style.display = "block";
+              collisionBox.innerHTML = `
+                <div class="duplicate-alert" style="margin-top: 8px;">
+                  <p>Ya tienes «${escapeHTML(newName)}». ¿Deseas unirlas?</p>
+                  <div class="duplicate-actions">
+                    <button type="button" class="btn-sm btn-primary" id="btn-inline-collision-merge">Unir etiquetas</button>
+                    <button type="button" class="btn-sm btn-secondary" id="btn-inline-collision-cancel">Cancelar</button>
+                  </div>
+                </div>
+              `;
+
+              collisionBox.querySelector("#btn-inline-collision-cancel").onclick = () => {
+                this.activeInlineEditId = null;
+                this.renderTagsView();
+              };
+
+              collisionBox.querySelector("#btn-inline-collision-merge").onclick = async () => {
+                if (targetTag && this.options.onMergeTags) {
+                  // Pasar los UUIDs a mergeTags
+                  const mergeRes = await this.options.onMergeTags(tagId, targetTag.id);
+                  if (mergeRes.ok) {
+                    this.options.reloadAll?.();
+                    this.close();
+                  }
+                }
+              };
+            }
+          }
+        }
+      } else if (action === "confirm-merge-tag") {
+        const select = row.querySelector(".inline-target-select");
+        const targetId = select.value;
+        const targetTag = this.allTags.find((t) => t.id === targetId);
+
+        if (targetId && targetTag && this.options.onMergeTags) {
+          if (btn.classList.contains("confirming")) {
+            btn.disabled = true;
+            // Pasar los UUIDs
+            const res = await this.options.onMergeTags(tagId, targetId);
+            if (res.ok) {
+              this.options.reloadAll?.();
+              this.close();
+            } else {
+              btn.disabled = false;
+              btn.classList.remove("confirming");
+              btn.textContent = "Unir en esta";
+            }
+          } else {
+            btn.classList.add("confirming");
+            btn.textContent = `¿Confirmar unión en #${targetTag.name}?`;
+            setTimeout(() => {
+              btn.classList.remove("confirming");
+              btn.textContent = "Unir en esta";
+            }, 4000);
+          }
+        }
+      } else if (action === "pick-color") {
         const color = btn.dataset.color;
         if (this.options.onUpdateTagColor) {
           const res = await this.options.onUpdateTagColor(tagId, color);
@@ -153,54 +312,6 @@ export class ManagementModal {
             const found = this.allTags.find((t) => t.id === tagId);
             if (found) found.color = color;
             this.renderTagsView();
-          }
-        }
-      } else if (action === "rename-tag") {
-        const newName = window.prompt(`Nuevo nombre para la etiqueta «${tagName}»:`, tagName);
-        if (!newName || !newName.trim() || newName.trim() === tagName) return;
-
-        if (this.options.onRenameTag) {
-          const res = await this.options.onRenameTag(tagId, newName.trim());
-          if (res.ok) {
-            const found = this.allTags.find((t) => t.id === tagId);
-            if (found) found.name = newName.trim();
-            this.renderTagsView();
-          } else if (res.isDuplicate) {
-            // Ofrecer unir etiquetas
-            const confirmMerge = window.confirm(`Ya tienes «${newName.trim()}». ¿Deseas unirlas?`);
-            if (confirmMerge && this.options.onMergeTags) {
-              const mergeRes = await this.options.onMergeTags(tagName, newName.trim());
-              if (mergeRes.ok) {
-                this.options.reloadAll?.();
-                this.close();
-              }
-            }
-          }
-        }
-      } else if (action === "merge-tag") {
-        const otherTags = this.allTags.filter((t) => t.id !== tagId);
-        if (otherTags.length === 0) {
-          window.alert("No hay otras etiquetas para unir.");
-          return;
-        }
-
-        const optionsText = otherTags.map((t, idx) => `${idx + 1}. #${t.name}`).join("\n");
-        const chosen = window.prompt(
-          `Unir «#${tagName}» en otra etiqueta existente.\nEscribe el número de la etiqueta destino:\n\n${optionsText}`,
-        );
-
-        const chosenIndex = parseInt(chosen, 10) - 1;
-        if (!isNaN(chosenIndex) && otherTags[chosenIndex]) {
-          const targetTag = otherTags[chosenIndex];
-          const confirmMerge = window.confirm(
-            `¿Unir todos los items de «#${tagName}» en «#${targetTag.name}»?`,
-          );
-          if (confirmMerge && this.options.onMergeTags) {
-            const res = await this.options.onMergeTags(tagName, targetTag.name);
-            if (res.ok) {
-              this.options.reloadAll?.();
-              this.close();
-            }
           }
         }
       } else if (action === "delete-tag") {
@@ -256,31 +367,46 @@ export class ManagementModal {
                 .map((c) => {
                   const count = counts.get(c.id) || 0;
                   const currentColor = c.color || "#2A4A8D";
+                  const isEditing = this.activeInlineEditId === c.id;
 
                   return `
               <div class="mgmt-row" data-collection-id="${c.id}" data-collection-name="${escapeHTML(c.name)}">
-                <div class="mgmt-row-main">
-                  <span class="mgmt-color-dot" style="background-color: ${escapeHTML(currentColor)};"></span>
-                  <span class="mgmt-row-name">📁 ${escapeHTML(c.name)}</span>
-                  <span class="chip-count">${count} items</span>
-                </div>
+                ${
+                  isEditing
+                    ? `
+                  <div class="inline-edit-box">
+                    <input type="text" class="form-control inline-col-rename-input" value="${escapeHTML(c.name)}" autocomplete="off">
+                    <div class="inline-edit-actions">
+                      <button type="button" class="btn-sm btn-primary" data-action="save-col-rename">Guardar</button>
+                      <button type="button" class="btn-sm btn-secondary" data-action="cancel-col-inline">Cancelar</button>
+                    </div>
+                  </div>
+                `
+                    : `
+                  <div class="mgmt-row-main">
+                    <span class="mgmt-color-dot" style="background-color: ${escapeHTML(currentColor)};"></span>
+                    <span class="mgmt-row-name">📁 ${escapeHTML(c.name)}</span>
+                    <span class="chip-count">${count} items</span>
+                  </div>
 
-                <div class="palette-bar">
-                  ${PALETTE_COLORS.map(
-                    (col) => `
-                    <button type="button" class="palette-swatch ${col === currentColor ? "selected" : ""}" style="background-color: ${col};" data-action="pick-collection-color" data-color="${col}" title="Cambiar color"></button>
-                  `,
-                  ).join("")}
-                </div>
+                  <div class="palette-bar">
+                    ${PALETTE_COLORS.map(
+                      (col) => `
+                      <button type="button" class="palette-swatch ${col === currentColor ? "selected" : ""}" style="background-color: ${col};" data-action="pick-collection-color" data-color="${col}" title="Cambiar color"></button>
+                    `,
+                    ).join("")}
+                  </div>
 
-                <div class="mgmt-row-actions">
-                  <button type="button" class="btn-sm btn-secondary" data-action="rename-collection" title="Renombrar">
-                    Renombrar
-                  </button>
-                  <button type="button" class="btn-sm btn-delete" data-action="delete-collection" title="Borrar">
-                    Borrar
-                  </button>
-                </div>
+                  <div class="mgmt-row-actions">
+                    <button type="button" class="btn-sm btn-secondary" data-action="start-col-rename">
+                      Renombrar
+                    </button>
+                    <button type="button" class="btn-sm btn-delete" data-action="delete-collection">
+                      Borrar
+                    </button>
+                  </div>
+                `
+                }
               </div>
             `;
                 })
@@ -290,6 +416,14 @@ export class ManagementModal {
     `;
 
     this.modalBody.innerHTML = html;
+
+    if (this.activeInlineEditId) {
+      const activeInput = this.modalBody.querySelector(".inline-col-rename-input");
+      if (activeInput) {
+        activeInput.focus();
+        activeInput.select();
+      }
+    }
 
     const btnCreate = this.modalBody.querySelector("#btn-create-collection");
     const nameInput = this.modalBody.querySelector("#new-collection-name");
@@ -327,7 +461,33 @@ export class ManagementModal {
       const colName = row.dataset.collectionName;
       const action = btn.dataset.action;
 
-      if (action === "pick-collection-color") {
+      if (action === "cancel-col-inline") {
+        this.activeInlineEditId = null;
+        this.renderCollectionsView();
+      } else if (action === "start-col-rename") {
+        this.activeInlineEditId = colId;
+        this.renderCollectionsView();
+      } else if (action === "save-col-rename") {
+        const input = row.querySelector(".inline-col-rename-input");
+        const newName = input.value.trim();
+        if (!newName || newName === colName) {
+          this.activeInlineEditId = null;
+          this.renderCollectionsView();
+          return;
+        }
+
+        if (this.options.onRenameCollection) {
+          btn.disabled = true;
+          const res = await this.options.onRenameCollection(colId, newName);
+          btn.disabled = false;
+          if (res.ok) {
+            this.activeInlineEditId = null;
+            const found = this.allCollections.find((c) => c.id === colId);
+            if (found) found.name = newName;
+            this.renderCollectionsView();
+          }
+        }
+      } else if (action === "pick-collection-color") {
         const color = btn.dataset.color;
         if (this.options.onUpdateCollectionColor) {
           const res = await this.options.onUpdateCollectionColor(colId, color);
@@ -337,25 +497,12 @@ export class ManagementModal {
             this.renderCollectionsView();
           }
         }
-      } else if (action === "rename-collection") {
-        const newName = window.prompt(`Nuevo nombre para la colección «${colName}»:`, colName);
-        if (!newName || !newName.trim() || newName.trim() === colName) return;
-
-        if (this.options.onRenameCollection) {
-          const res = await this.options.onRenameCollection(colId, newName.trim());
-          if (res.ok) {
-            const found = this.allCollections.find((c) => c.id === colId);
-            if (found) found.name = newName.trim();
-            this.renderCollectionsView();
-          }
-        }
       } else if (action === "delete-collection") {
         if (btn.classList.contains("confirming")) {
           if (this.options.onDeleteCollection) {
             const res = await this.options.onDeleteCollection(colId);
             if (res.ok) {
               this.allCollections = this.allCollections.filter((c) => c.id !== colId);
-              // Desvincular items en cliente
               this.allItems.forEach((i) => {
                 if (i.collection_id === colId) i.collection_id = null;
               });

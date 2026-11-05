@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>myFetchy</title>
 
+    <!-- PWA y Manifest -->
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <meta name="theme-color" content="#2A4A8D" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="myFetchy" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" href="./icons/favicon.png" />
+
     <!-- Tipografías institucionales -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,6 +26,27 @@
     <link rel="stylesheet" href="./css/app.css" />
   </head>
   <body>
+    <!-- Banner de Modo Sin Conexión -->
+    <div id="offline-banner" class="offline-banner" style="display: none">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+      >
+        <line x1="1" y1="1" x2="23" y2="23"></line>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+        <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+      </svg>
+      Sin conexión. Estás viendo tu última copia.
+    </div>
+
     <!-- Vista de Autenticación -->
     <main id="auth-view" class="auth-view">
       <div class="auth-card">
@@ -95,6 +125,26 @@
 
               <!-- Menú Desplegable -->
               <div id="header-menu-dropdown" class="menu-dropdown">
+                <button
+                  type="button"
+                  id="menu-item-install"
+                  class="menu-item"
+                  style="display: none"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Instalar app
+                </button>
                 <button type="button" class="menu-item" data-mgmt="tags">
                   <svg
                     width="16"
@@ -318,6 +368,28 @@
             <select id="item-collection" class="form-control">
               <option value="">Sin colección</option>
             </select>
+            <!-- Formulario Inline para Nueva Colección (Sin prompt nativo) -->
+            <div
+              id="inline-new-col-box"
+              class="mgmt-create-box"
+              style="display: none; margin-top: 8px"
+            >
+              <input
+                type="text"
+                id="inline-new-col-input"
+                class="form-control"
+                placeholder="Nombre de la nueva colección..."
+                autocomplete="off"
+              />
+              <div style="display: flex; gap: 6px; margin-top: 6px">
+                <button type="button" class="btn-sm btn-primary" id="btn-save-inline-col">
+                  Crear
+                </button>
+                <button type="button" class="btn-sm btn-secondary" id="btn-cancel-inline-col">
+                  Cancelar
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="form-group">
